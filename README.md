@@ -61,3 +61,17 @@ model2 = RFDETRNano(num_classes=num_classes, pretrain_weights= weights_path)
 You must have a file like COCO_CLASSES with your model's classes.
 
 3) ```python test.py```
+
+## Training
+
+1) Change the config in train.py
+dataset = "/media/elena/T7/BDD100K/coco"
+epochs = 100
+num_classes = 7
+early_stopping = True
+early_stopping_patience = 20
+batch_size = 8
+grad_accum_steps = 2 # tot BATCH SIZE = batch_size * grad_accum_steps
+output_dir = "/path/to/output"
+
+2) ```python train.py```
