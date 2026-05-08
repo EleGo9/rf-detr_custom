@@ -320,8 +320,6 @@ class RFDETR:
                     "pred_logits": predictions[1],
                     "pred_boxes": predictions[0],
                 }
-                # print("pred_logits ", predictions[1])
-                # print("pred_boxes ", predictions[0])
 
                 if len(predictions) == 3:
                     predictions["pred_masks"] = predictions[2]

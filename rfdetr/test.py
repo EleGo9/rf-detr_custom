@@ -11,13 +11,12 @@ import random
 state_dict = None
 # Compile with your model data
 # Config:
-num_classes = 7
+num_classes = 90
 weights_path = "/path/to/weights.pth"
 images_files = "path/to/images/*"
 output = "path/to/predictions"
 model1 = RFDETRNano() #COCO weights (default)
 model2 = RFDETRNano(num_classes=num_classes, pretrain_weights= weights_path)
-model1 = RFDETRNano()
 
 
 
