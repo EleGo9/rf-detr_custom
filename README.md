@@ -26,6 +26,11 @@ To install the entire environment:
 ```
 conda create --file environment.yml
 ```
+To install locally rfdetr:
+```
+export PYTHONPATH=/home/elenagovi/repos/rf-detr_custom:$PYTHONPATH
+python -c "import rfdetr; print(rfdetr.__file__)"
+```
 
 ## Onnx exportation
 

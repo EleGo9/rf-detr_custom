@@ -18,6 +18,7 @@ Transforms and data augmentation for both image + bbox.
 """
 import random
 
+import cv2
 import PIL
 import numpy as np
 try:
@@ -96,6 +97,7 @@ def hflip(image, target):
 
 def resize(image, target, size, max_size=None):
     # size can be min_size (scalar) or (w, h) tuple
+    # print("Be careful: you are using a different reisze interpolation method (cv2.INTER_LINEAR) than the default one in torchvision.transforms.Resize (PIL.Image.BILINEAR). This may lead to different results.")
 
     def get_size_with_aspect_ratio(image_size, size, max_size=None):
         w, h = image_size
@@ -124,7 +126,10 @@ def resize(image, target, size, max_size=None):
             return get_size_with_aspect_ratio(image_size, size, max_size)
 
     size = get_size(image.size, size, max_size)
-    rescaled_image = F.resize(image, size)
+    h, w = size
+    img_array = np.array(image.convert("RGB"))
+    img_array = cv2.resize(img_array, (w, h), interpolation=cv2.INTER_LINEAR)
+    rescaled_image = PIL.Image.fromarray(img_array)
 
     if target is None:
         return rescaled_image, None
@@ -218,6 +223,8 @@ class RandomResize(object):
         assert isinstance(sizes, (list, tuple))
         self.sizes = sizes
         self.max_size = max_size
+        print("Be careful: you are using a different reisze interpolation method (cv2.INTER_LINEAR) than the default one in torchvision.transforms.Resize (PIL.Image.BILINEAR). This may lead to different results.")
+
 
     def __call__(self, img, target=None):
         size = random.choice(self.sizes)
@@ -231,7 +238,9 @@ class SquareResize(object):
 
     def __call__(self, img, target=None):
         size = random.choice(self.sizes)
-        rescaled_img=F.resize(img, (size, size))
+        img_array = np.array(img.convert("RGB"))
+        img_array = cv2.resize(img_array, (size, size), interpolation=cv2.INTER_LINEAR)
+        rescaled_img = PIL.Image.fromarray(img_array)
         w, h = rescaled_img.size
         if target is None:
             return rescaled_img, None
