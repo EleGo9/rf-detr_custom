@@ -17,6 +17,7 @@ import supervision as sv
 import torch
 import torchvision.transforms.functional as F
 from PIL import Image
+import cv2
 
 try:
     torch.set_float32_matmul_precision('high')
@@ -47,6 +48,10 @@ class RFDETR:
     """
     means = [0.485, 0.456, 0.406]
     stds = [0.229, 0.224, 0.225]
+    
+    # means = [0, 0, 0]
+    # stds = [1, 1, 1]
+    
     size = None
 
     def __init__(self, **kwargs):
@@ -62,6 +67,9 @@ class RFDETR:
         self._optimized_batch_size = None
         self._optimized_resolution = None
         self._optimized_dtype = None
+        
+        self.last_prediction = None
+        self.last_input_tensor = None
 
     def maybe_download_pretrain_weights(self):
         """
@@ -219,6 +227,78 @@ class RFDETR:
             
         return COCO_CLASSES
 
+    def get_last_raw_results(self):
+        """
+        Stampa e restituisce i logit e i box salvati nell'ultima chiamata a predict().
+        """
+        if self.last_prediction is None:
+            print("Nessuna predizione trovata. Esegui prima model.predict().")
+            return None, None
+
+        logits = self.last_prediction["pred_logits"]
+        boxes = self.last_prediction["pred_boxes"]
+        
+        print(f"logits shape: {logits.shape}")
+        print(f"boxes shape: {boxes.shape}")
+
+        
+        logits_cpu = logits.cpu().to(torch.float32).contiguous()
+        logits_cpu.numpy().tofile("logits_dump.bin")
+        
+        # Prepara e salva i boxes
+        boxes_cpu = boxes.cpu().to(torch.float32).contiguous()
+        boxes_cpu.numpy().tofile("boxes_dump.bin")
+
+        # Imposta la stampa completa
+        torch.set_printoptions(threshold=float('inf'))
+        
+        # print("\n=== LOGITS ===")
+        # print(logits)
+        # print(f"Shape: {logits.shape}")
+        
+        # print("\n=== BOX ===")
+        # print(boxes)
+        # print(f"Shape: {boxes.shape}")
+        
+        # Ripristina la stampa standard
+        # torch.set_printoptions(profile="default")
+
+        return logits, boxes
+
+    def get_last_input_tensor(self, save_to_bin=True):
+        """
+        Stampa e restituisce il tensore dell'immagine preprocessata usato nell'ultima predict().
+        Se save_to_bin è True, lo salva in formato binario raw per C++.
+        """
+        if getattr(self, 'last_input_tensor', None) is None:
+            print("Nessun tensore di input trovato. Esegui prima model.predict().")
+            return None
+
+        # Questo è il tensore finale che entra nella rete: shape (batch_size, 3, H, W)
+        input_tensor = self.last_input_tensor
+
+        print("\n=== INPUT TENSOR ===")
+        print(f"Shape: {input_tensor.shape}")
+        print(f"Min: {input_tensor.min().item():.4f}")
+        print(f"Max: {input_tensor.max().item():.4f}")
+        print(f"Mean: {input_tensor.mean().item():.4f}")
+
+
+        tensor_cpu = input_tensor.cpu().to(torch.float32).contiguous()
+        filename = "input_tensor_dump.bin"
+        tensor_cpu.numpy().tofile(filename)
+
+
+        # torch.set_printoptions(threshold=10_000_000)
+
+        # print("\n--- INPUT IMAGE ---")
+        # print(input_tensor.cpu()) 
+
+        # Ripristina la stampa standard di PyTorch
+        torch.set_printoptions(profile="default")
+
+        return input_tensor
+    
     def predict(
         self,
         images: Union[str, Image.Image, np.ndarray, torch.Tensor, List[Union[str, np.ndarray, Image.Image, torch.Tensor]]],
@@ -247,6 +327,7 @@ class RFDETR:
                 objects, each containing bounding box coordinates, confidence scores,
                 and class IDs.
         """
+        
         if not self._is_optimized_for_inference and not self._has_warned_about_not_being_optimized_for_inference:
             logger.warning(
                 "Model is not optimized for inference. "
@@ -264,39 +345,79 @@ class RFDETR:
         processed_images = []
 
         for img in images:
-
+            
             if isinstance(img, str):
-                img = Image.open(img)
+                img = Image.open(img).convert("RGB")
 
-            if not isinstance(img, torch.Tensor):
-                img = F.to_tensor(img)
-            
-            if (img > 1).any():
-                raise ValueError(
-                    "Image has pixel values above 1. Please ensure the image is "
-                    "normalized (scaled to [0, 1])."
-                )
-            if img.shape[0] != 3:
-                raise ValueError(
-                    f"Invalid image shape. Expected 3 channels (RGB), but got "
-                    f"{img.shape[0]} channels."
-                )
-            img_tensor = img
-            
-            h, w = img_tensor.shape[1:]
-            orig_sizes.append((h, w))
+            if isinstance(img, Image.Image):
+                img = np.array(img)
 
-            img_tensor = img_tensor.to(self.model.device)
-            img_tensor = F.normalize(img_tensor, self.means, self.stds)
-            img_tensor = F.resize(img_tensor, (self.model.resolution, self.model.resolution))
+            if isinstance(img, np.ndarray):
+                h, w = img.shape[:2]
+                orig_sizes.append((h, w))
+                
+                if img.shape[2] != 3:
+                    raise ValueError(
+                        f"Invalid image shape. Expected 3 channels (RGB), but got "
+                        f"{img.shape[2]} channels."
+                    )
+
+                # Float conversion
+                if img.dtype == np.uint8:
+                    img_array = img / 255.0
+                else:
+                    img_array = img.astype(np.float32)
+
+                # OpenCV Resize
+                res = self.model.resolution
+                img_array = cv2.resize(img_array, (res, res), interpolation=cv2.INTER_LINEAR)
+
+                # NumPy Normalization
+                mean = np.array(self.means, dtype=np.float32)
+                std = np.array(self.stds, dtype=np.float32)
+                img_array = ((img_array - mean) / std).astype(np.float32)
+
+                img_array = np.transpose(img_array, (2, 0, 1))
+                img_tensor = torch.from_numpy(img_array).to(self.model.device)
+
+            elif isinstance(img, torch.Tensor):
+                if (img > 1).any():
+                    raise ValueError(
+                        "Image has pixel values above 1. Please ensure the image is "
+                        "normalized (scaled to [0, 1])."
+                    )
+                if img.shape[0] != 3:
+                    raise ValueError(
+                        f"Invalid image shape. Expected 3 channels (RGB), but got "
+                        f"{img.shape[0]} channels."
+                    )
+                
+                h, w = img.shape[1:]
+                orig_sizes.append((h, w))
+
+                img_array = img.cpu().numpy()
+                img_array = np.transpose(img_array, (1, 2, 0))  # CHW -> HWC
+                
+                res = self.model.resolution
+                img_array = cv2.resize(img_array, (res, res), interpolation=cv2.INTER_LINEAR)
+
+                mean = np.array(self.means, dtype=np.float32)
+                std = np.array(self.stds, dtype=np.float32)
+                img_array = ((img_array - mean) / std).astype(np.float32)
+
+                img_array = np.transpose(img_array, (2, 0, 1))
+                img_tensor = torch.from_numpy(img_array).to(self.model.device)
+                
+            else:
+                raise TypeError(f"Unsupported image type: {type(img)}")
 
             processed_images.append(img_tensor)
 
         batch_tensor = torch.stack(processed_images)
+        self.last_input_tensor = batch_tensor
 
         if self._is_optimized_for_inference:
             if self._optimized_resolution != batch_tensor.shape[2]:
-                # this could happen if someone manually changes self.model.resolution after optimizing the model
                 raise ValueError(f"Resolution mismatch. "
                                  f"Model was optimized for resolution {self._optimized_resolution}, "
                                  f"but got {batch_tensor.shape[2]}. "
@@ -323,11 +444,10 @@ class RFDETR:
 
                 if len(predictions) == 3:
                     predictions["pred_masks"] = predictions[2]
+                    
+            self.last_prediction = predictions
+            
             target_sizes = torch.tensor(orig_sizes, device=self.model.device)
-            # print("pred_logits ", predictions["pred_logits"])
-            # print("shape ", predictions["pred_logits"].shape)
-            # print("pred_boxes ", predictions["pred_boxes"])
-            # print("shape ", predictions["pred_boxes"].shape)
             results = self.model.postprocess(predictions, target_sizes=target_sizes)
 
         detections_list = []
@@ -361,7 +481,7 @@ class RFDETR:
             detections_list.append(detections)
 
         return detections_list if len(detections_list) > 1 else detections_list[0]
-    
+        
     def deploy_to_roboflow(self, workspace: str, project_id: str, version: str, api_key: str = None, size: str = None):
         """
         Deploy the trained RF-DETR model to Roboflow.
