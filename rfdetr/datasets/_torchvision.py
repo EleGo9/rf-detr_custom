@@ -21,6 +21,8 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any, Dict, Optional, Tuple, TypeAlias, cast
 
+import cv2
+import numpy as np
 import torch
 from PIL import Image
 from torchvision import tv_tensors
@@ -307,6 +309,7 @@ class RandomResize:
             raise ValueError("sizes must contain at least one value")
         self.sizes = [int(size) for size in sizes]
         self.max_size = max_size
+        print("Be careful: you are using a different resize interpolation method (cv2.INTER_LINEAR) than the default one in torchvision.transforms.Resize (PIL.Image.BILINEAR). This may lead to different results.")
 
     def __call__(
         self, image: Image.Image | torch.Tensor, target: Optional[Dict[str, Any]] = None
@@ -393,18 +396,29 @@ class Resize:
         """
         old_height, old_width = _image_size(image)
         new_height, new_width = self.size
-        # antialias is a no-op for the default (train/val/export) path: it feeds PIL images here
-        # (ToImage runs after resize), and torchvision always antialiases PIL input, ignoring this
-        # flag. Micro-benchmark (600x800 -> 640x640, 200 iters): PIL antialias True vs False both
-        # ~1.52 ms (identical); it only changes tensor input (~0.55 vs 0.45 ms). Kept True so tensor
-        # inputs match PIL's always-on antialiasing rather than as a perf lever -- do not flip it to
-        # speed up the CPU path; it would not (the cost is PIL.resize itself, not antialiasing).
-        image = functional.resize(
-            image,
-            [new_height, new_width],
-            interpolation=InterpolationMode.BILINEAR,
-            antialias=True,
-        )
+        if isinstance(image, Image.Image):
+            # Matches the cv2.INTER_LINEAR resize used by our C++/OpenCV inference
+            # pipeline, for train/val/export parity. torchvision's PIL bilinear resize
+            # (always antialiased) gives slightly different pixels than cv2's, which
+            # matters when comparing this model's outputs bit-for-bit against ONNX/C++.
+            img_array = np.array(image.convert("RGB"))
+            img_array = cv2.resize(
+                img_array, (new_width, new_height), interpolation=cv2.INTER_LINEAR
+            )
+            image = Image.fromarray(img_array)
+        else:
+            # antialias is a no-op for the default (train/val/export) path: it feeds PIL images here
+            # (ToImage runs after resize), and torchvision always antialiases PIL input, ignoring this
+            # flag. Micro-benchmark (600x800 -> 640x640, 200 iters): PIL antialias True vs False both
+            # ~1.52 ms (identical); it only changes tensor input (~0.55 vs 0.45 ms). Kept True so tensor
+            # inputs match PIL's always-on antialiasing rather than as a perf lever -- do not flip it to
+            # speed up the CPU path; it would not (the cost is PIL.resize itself, not antialiasing).
+            image = functional.resize(
+                image,
+                [new_height, new_width],
+                interpolation=InterpolationMode.BILINEAR,
+                antialias=True,
+            )
         if target is None:
             return image, None
 
