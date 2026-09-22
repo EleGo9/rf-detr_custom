@@ -35,33 +35,40 @@ def filter_classes(dataset, keep_classes, drop_empty_images=True):
         new_annotations[path] = filtered
 
     new_image_paths = [p for p in dataset.image_paths if p in new_annotations]
-    print(f"  Immagini mantenute: {len(new_image_paths)} / {len(dataset.image_paths)}")
+    print(f"[Filtering on classes ...] maintained images: {len(new_image_paths)} / {len(dataset.image_paths)}")
     return sv.DetectionDataset(classes=keep_classes, images=new_image_paths, annotations=new_annotations)
 
 # KEEP_CLASSES = None # (all)
-KEEP_CLASSES = ["truck", "vtlm", "dump", "excavator", "tractor", "bulldozer", "flatbed"]
-
-OUTPUT_DIR = "where/you/want/to/save/your/dataset/"
+# KEEP_CLASSES = ["truck", "vtlm", "dump", "excavator", "tractor", "bulldozer", "flatbed"]
+KEEP_CLASSES = ["truck", "car", "person", "forklift"] # "excavator"]
+# OUTPUT_DIR = "where/you/want/to/save/your/dataset/"
+# IMAGES_DIR_PATH = "/path/to/images/train"
+# ANNOTATIONS_DIR_PATH = "/path/to/labels/train"
+# DATA_YAML_PATH = "/path/to/data.yaml"
+OUTPUT_DIR = "/media/elena/T9/HAura/mcap/lacisa_coco_format"
+IMAGES_DIR_PATH = "/media/elena/T9/HAura/mcap/lacisa_yolo_format/images/"
+ANNOTATIONS_DIR_PATH = "/media/elena/T9/HAura/mcap/lacisa_yolo_format/labels/"
+DATA_YAML_PATH = "/media/elena/T9/HAura/mcap/lacisa_yolo_format/data.yaml"
 
 dataset_train = sv.DetectionDataset.from_yolo(
-    images_directory_path="/path/to/images/train",
-    annotations_directory_path="/path/to/labels/train/",
-    data_yaml_path="/path/to/data.yaml"
+    images_directory_path= os.path.join(IMAGES_DIR_PATH,"train"),
+    annotations_directory_path= os.path.join(ANNOTATIONS_DIR_PATH,"train"),
+    data_yaml_path=DATA_YAML_PATH
 )
 print(f"Train images: {len(dataset_train)}")
 if KEEP_CLASSES:
     dataset_train = filter_classes(dataset_train, KEEP_CLASSES)
 
 dataset_val = sv.DetectionDataset.from_yolo(
-    images_directory_path="/path/to/images/valid",
-    annotations_directory_path="/path/to/labels/val",
-    data_yaml_path="/path/to/data.yaml"
+    images_directory_path=os.path.join(IMAGES_DIR_PATH,"valid"),
+    annotations_directory_path=os.path.join(ANNOTATIONS_DIR_PATH,"valid"),
+    data_yaml_path=DATA_YAML_PATH
 )
 print(f"Valid images: {len(dataset_val)}")
 if KEEP_CLASSES:
     dataset_val = filter_classes(dataset_val, KEEP_CLASSES)
     write_filtered_yaml(
-        "/path/to/data.yaml",
+        DATA_YAML_PATH,
         KEEP_CLASSES,
         OUTPUT_DIR
     )

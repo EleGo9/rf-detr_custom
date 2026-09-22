@@ -35,7 +35,7 @@ python -c "import rfdetr; print(rfdetr.__file__)"
 ## Onnx exportation
 
  ```
- python export_onnx_custom_v2.py   --weights path/to/checkpoint_best.pth   --num-classes 7   --output output/model.onnx
+ python export_onnx.py   --weights path/to/checkpoint_best.pth   --num-classes 7   --output output/model.onnx
  ```
 
 ## Debug comparison between onnx and pth model

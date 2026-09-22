@@ -252,13 +252,13 @@ class RFDETR:
         # Imposta la stampa completa
         torch.set_printoptions(threshold=float('inf'))
         
-        # print("\n=== LOGITS ===")
-        # print(logits)
-        # print(f"Shape: {logits.shape}")
+        print("\n=== LOGITS ===")
+        print(logits)
+        print(f"Shape: {logits.shape}")
         
-        # print("\n=== BOX ===")
-        # print(boxes)
-        # print(f"Shape: {boxes.shape}")
+        print("\n=== BOX ===")
+        print(boxes)
+        print(f"Shape: {boxes.shape}")
         
         # Ripristina la stampa standard
         # torch.set_printoptions(profile="default")

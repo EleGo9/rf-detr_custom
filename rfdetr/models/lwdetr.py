@@ -213,7 +213,7 @@ class LWDETR(nn.Module):
 
         return out
 
-    def forward_export(self, tensors):
+    def forward_export_old(self, tensors):
         srcs, _, poss = self.backbone(tensors)
         # only use one group in inference
         refpoint_embed_weight = self.refpoint_embed.weight[:self.num_queries]
@@ -248,6 +248,87 @@ class LWDETR(nn.Module):
             return outputs_coord, outputs_class, outputs_masks
         else:
             return outputs_coord, outputs_class
+        
+    def forward_export(self, tensors):
+        # 1. Convertiamo il tensore in NestedTensor (senza maschera di padding per l'export)
+        # Se per l'export passi già una lista o un Tensor nudo, questo ricrea la struttura corretta
+        # 1. Estraiamo il tensore puro se viene passato un NestedTensor
+        srcs, _, poss = self.backbone(tensors)
+        
+        # 3. Recuperiamo i 'features' originari nel formato corretto per la segmentation_head
+        # La testa di segmentazione si aspetta una struttura simile a features[0].tensors
+        # Creiamo un finto oggetto che espone la proprietà .tensors per non rompere i calcoli successivi
+
+        # srcs = []
+        # masks = []
+        # for l, feat in enumerate(features):
+        #     src, mask = feat.decompose()
+        #     srcs.append(src)
+        #     masks.append(mask)
+
+        # 3. Logica di inferenza per i pesi delle query (usiamo solo un gruppo)
+        refpoint_embed_weight = self.refpoint_embed.weight[:self.num_queries]
+        query_feat_weight = self.query_feat.weight[:self.num_queries]
+
+        # 4. Transformer Forward
+        hs, ref_unsigmoid, hs_enc, ref_enc = self.transformer(
+        srcs, None, poss, refpoint_embed_weight, query_feat_weight
+    )
+
+        out = {}
+
+        # 5. Ramo Decoder (hs is not None)
+        if hs is not None:
+            if self.bbox_reparam:
+                outputs_coord_delta = self.bbox_embed(hs)
+                outputs_coord_cxcy = outputs_coord_delta[..., :2] * ref_unsigmoid[..., 2:] + ref_unsigmoid[..., :2]
+                outputs_coord_wh = outputs_coord_delta[..., 2:].exp() * ref_unsigmoid[..., 2:]
+                outputs_coord = torch.concat(
+                    [outputs_coord_cxcy, outputs_coord_wh], dim=-1
+                )
+            else:
+                outputs_coord = (self.bbox_embed(hs) + ref_unsigmoid).sigmoid()
+
+            outputs_class = self.class_embed(hs)
+
+            # Corretto: passiamo features[0].tensors e non srcs[0]
+            if self.segmentation_head is not None:
+                outputs_masks = self.segmentation_head(features[0].tensors, hs, samples.tensors.shape[-2:])
+
+            # Fondamentale: Estraiamo l'ultimo layer [-1] come nel forward originale
+            out = {'pred_logits': outputs_class[-1], 'pred_boxes': outputs_coord[-1]}
+            if self.segmentation_head is not None:
+                out['pred_masks'] = outputs_masks[-1]
+                
+            # Nota: aux_outputs viene saltato perché siamo in export/inference
+
+        # 6. Ramo Two-Stage
+        if self.two_stage:
+            # In export group_detr è sempre 1 (essendo in inferenza)
+            group_detr = 1 
+            hs_enc_list = hs_enc.chunk(group_detr, dim=1)
+            cls_enc = []
+            for g_idx in range(group_detr):
+                cls_enc_gidx = self.transformer.enc_out_class_embed[g_idx](hs_enc_list[g_idx])
+                cls_enc.append(cls_enc_gidx)
+
+            cls_enc = torch.cat(cls_enc, dim=1)
+
+            if self.segmentation_head is not None:
+                # Corretto: passiamo features[0].tensors e non usiamo l'estrazione [0] alla fine
+                masks_enc = self.segmentation_head(features[0].tensors, [hs_enc,], samples.tensors.shape[-2:], skip_blocks=True)
+                masks_enc = torch.cat(masks_enc, dim=1)
+
+            if hs is not None:
+                out['enc_outputs'] = {'pred_logits': cls_enc, 'pred_boxes': ref_enc}
+                if self.segmentation_head is not None:
+                    out['enc_outputs']['pred_masks'] = masks_enc
+            else:
+                out = {'pred_logits': cls_enc, 'pred_boxes': ref_enc}
+                if self.segmentation_head is not None:
+                    out['pred_masks'] = masks_enc
+
+        return out['pred_boxes'], out['pred_logits']
 
     @torch.jit.unused
     def _set_aux_loss(self, outputs_class, outputs_coord, outputs_masks):

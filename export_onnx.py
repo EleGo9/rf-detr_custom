@@ -1,7 +1,3 @@
-"""
-Script custom per esportare RF-DETR in ONNX.
-Supporta tutti i modelli: Nano, Small, Medium, Base, Large.
-"""
 
 import os
 import torch
@@ -83,7 +79,7 @@ def export_rfdetr_to_onnx(
         simplify: Se True, semplifica il modello ONNX (richiede onnxsim)
         device: Device per l'export ("cpu" o "cuda")
     """
-    from rfdetr import RFDETRNano, RFDETRSmall, RFDETRMedium, RFDETRBase, RFDETRLarge
+    from rfdetr import RFDETRNano, RFDETRSmall, RFDETRMedium, RFDETRBase, RFDETRLarge, RFDETRSegNano, RFDETRSegSmall
 
     # Mappa delle classi
     model_classes = {
@@ -92,6 +88,8 @@ def export_rfdetr_to_onnx(
         "RFDETRMedium": RFDETRMedium,
         "RFDETRBase": RFDETRBase,
         "RFDETRLarge": RFDETRLarge,
+        "RFDETRSegNano": RFDETRSegNano,
+        "RFDETRSegSmall": RFDETRSegSmall,
     }
 
     
@@ -130,6 +128,7 @@ def export_rfdetr_to_onnx(
     print("Test forward pass...")
     with torch.no_grad():
         outputs = pytorch_model(dummy_input)
+        has_masks = isinstance(outputs, dict) and "pred_masks" in outputs
         if isinstance(outputs, dict):
             print(f"  - pred_boxes shape: {outputs['pred_boxes'].shape}")
             print(f"  - pred_logits shape: {outputs['pred_logits'].shape}")
@@ -145,7 +144,12 @@ def export_rfdetr_to_onnx(
     print(f"Esportazione ONNX in: {output_path}")
 
     input_names = ["images"]
+    # I modelli di sola detection (non-segmentazione) restituiscono solo (pred_boxes, pred_logits):
+    # dichiarare "pred_masks" anche per loro fa fallire torch.onnx.export ("number of output names
+    # provided exceeded number of outputs").
     output_names = ["pred_boxes", "pred_logits"]
+    if has_masks:
+        output_names.append("pred_masks")
 
     # Assi dinamici per supportare batch size variabile
     dynamic_axes = {
@@ -153,6 +157,8 @@ def export_rfdetr_to_onnx(
         "pred_boxes": {0: "batch_size"},
         "pred_logits": {0: "batch_size"},
     }
+    if has_masks:
+        dynamic_axes["pred_masks"] = {0: "batch_size"}
 
     # Usa l'exporter legacy per compatibilità con modelli complessi
     # Il nuovo exporter dynamo non supporta bene operazioni custom
@@ -244,7 +250,7 @@ if __name__ == "__main__":
         "--model",
         type=str,
         default="RFDETRNano",
-        choices=["RFDETRNano", "RFDETRSmall", "RFDETRMedium", "RFDETRBase", "RFDETRLarge"],
+        choices=["RFDETRNano", "RFDETRSmall", "RFDETRMedium", "RFDETRBase", "RFDETRLarge", "RFDETRSegNano", "RFDETRSegSmall"],
         help="Classe del modello da esportare",
     )
     parser.add_argument(

@@ -6,7 +6,7 @@ import torch
 import cv2
 
 # Load the ONNX model
-session = ort.InferenceSession("weights/model_ferrari.onnx")
+session = ort.InferenceSession("/home/elena/repos/rf-detr/rf-detr-nano_berkley_cv-resize/model_new_export.onnx")
 
 # Prepare input image
 # image = Image.open("images/red.png").convert("RGB")
@@ -16,7 +16,7 @@ session = ort.InferenceSession("weights/model_ferrari.onnx")
 # output_path = "images/resized_image.png"
 # image.save(output_path)
 
-image = cv2.imread("/home/sseveri/rf-detr_custom/images/20260424_4porte_giro_strada_dritta_nonantola_cam_f_1777039829690638875.png")
+image = cv2.imread("/media/elena/T7/rfdetr_ferrari/20260424_4porte_giro_strada_dritta_nonantola/images/20260424_4porte_giro_strada_dritta_nonantola_cam_f_1777039818257537541.jpg")
 image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
 # float conversion
@@ -38,9 +38,12 @@ image_array_contiguous.tofile("onnx_input_tensor_dump.bin")
 # Run inference
 outputs = session.run(None, {"images": image_array})
 onnx_boxes, onnx_labels = outputs
+# if onnx_labels.shape==2:
+onnx_boxes = np.expand_dims(onnx_boxes, axis=0)
+onnx_labels = np.expand_dims(onnx_labels, axis=0)
 
 
-model = RFDETRNano(num_classes=7, pretrain_weights= "weights/checkpoint_best_ema.pth")
+model = RFDETRNano(num_classes=7, pretrain_weights= "/home/elena/repos/rf-detr/rf-detr-nano_berkley_cv-resize/checkpoint_best_total.pth")
 detections = model.predict(image, threshold=0.3)
 logits, boxes = model.get_last_raw_results()
 torch_input_tensor = model.get_last_input_tensor()
@@ -56,7 +59,6 @@ print(onnx_labels[:10])
 print("\n" + "="*40)
 print("=== CONFRONTO SHAPE ===")
 print("="*40)
-# Assumiamo che onnx_labels sia in realtà il tensore dei logits
 print(f"ONNX Logits shape: {onnx_labels.shape} | PyTorch Logits shape: {torch_logits_np.shape}")
 print(f"ONNX Boxes shape:  {onnx_boxes.shape} | PyTorch Boxes shape:  {torch_boxes_np.shape}")
 
