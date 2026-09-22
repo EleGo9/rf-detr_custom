@@ -5,7 +5,7 @@ import numpy as np
 from PIL import Image
 import supervision as sv
 from rfdetr import RFDETRNano, RFDETRSmall
-from util.coco_classes import COCO_CLASSES
+from rfdetr.assets.coco_classes import COCO_CLASSES
 
 THRESHOLD = 0.3
 TARGET_FPS = 5  # frame al secondo da processare (None = tutti)

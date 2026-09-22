@@ -3,8 +3,8 @@ import requests
 import supervision as sv
 from PIL import Image, ImageDraw, ImageFont
 from rfdetr import RFDETRNano
-from util.coco_classes import COCO_CLASSES
-from util.berkley_classes import BERKLEY_CLASSES #import a file with the classes of your dataset during training. 
+from rfdetr.assets.coco_classes import COCO_CLASSES
+from rfdetr.assets.berkley_classes import BERKLEY_CLASSES #import a file with the classes of your dataset during training.
 import glob
 import os
 import random
