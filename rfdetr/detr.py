@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Concatenate, Literal, ParamSpec, TypeVar, cast
 from urllib.parse import urlparse
 
+import cv2
 import numpy as np
 import requests
 import torch
@@ -505,6 +506,11 @@ class RFDETR:
         self._optimized_dtype: torch.dtype | None = None
         self._optimized_inplace = False
         self._has_been_trained = False
+
+        # Debug state populated by predict() for bit-for-bit comparison against a
+        # separate C++/ONNX inference pipeline.
+        self.last_prediction: dict[str, torch.Tensor] | None = None
+        self.last_input_tensor: torch.Tensor | None = None
 
     def maybe_download_pretrain_weights(self) -> None:
         """Download pre-trained weights if they are not already downloaded.
@@ -2325,6 +2331,58 @@ class RFDETR:
         if any(module.training for module in model.modules()):
             model.eval()
 
+    def get_last_raw_results(self) -> tuple[torch.Tensor, torch.Tensor] | tuple[None, None]:
+        """Print and return the raw logits/boxes saved by the last predict() call.
+
+        Dumps them to logits_dump.bin / boxes_dump.bin (float32) for comparison against a
+        separate C++/ONNX inference pipeline.
+        """
+        if self.last_prediction is None:
+            print("Nessuna predizione trovata. Esegui prima model.predict().")
+            return None, None
+
+        logits = self.last_prediction["pred_logits"]
+        boxes = self.last_prediction["pred_boxes"]
+
+        print(f"logits shape: {logits.shape}")
+        print(f"boxes shape: {boxes.shape}")
+
+        logits.cpu().to(torch.float32).contiguous().numpy().tofile("logits_dump.bin")
+        boxes.cpu().to(torch.float32).contiguous().numpy().tofile("boxes_dump.bin")
+
+        torch.set_printoptions(threshold=float("inf"))
+        print("\n=== LOGITS ===")
+        print(logits)
+        print(f"Shape: {logits.shape}")
+        print("\n=== BOX ===")
+        print(boxes)
+        print(f"Shape: {boxes.shape}")
+        torch.set_printoptions(profile="default")
+
+        return logits, boxes
+
+    def get_last_input_tensor(self, save_to_bin: bool = True) -> torch.Tensor | None:
+        """Print and return the preprocessed input tensor from the last predict() call.
+
+        If save_to_bin is True, dumps it as raw float32 binary for comparison against a
+        separate C++/ONNX inference pipeline.
+        """
+        if self.last_input_tensor is None:
+            print("Nessun tensore di input trovato. Esegui prima model.predict().")
+            return None
+
+        input_tensor = self.last_input_tensor
+        print("\n=== INPUT TENSOR ===")
+        print(f"Shape: {input_tensor.shape}")
+        print(f"Min: {input_tensor.min().item():.4f}")
+        print(f"Max: {input_tensor.max().item():.4f}")
+        print(f"Mean: {input_tensor.mean().item():.4f}")
+
+        if save_to_bin:
+            input_tensor.cpu().to(torch.float32).contiguous().numpy().tofile("input_tensor_dump.bin")
+
+        return input_tensor
+
     @torch.inference_mode()
     # mypy can't match this signature against _ensure_model_on_device's Concatenate[Any, _P] typing without
     # `self` being positional-only (a side effect of the trailing **kwargs); ignored rather than changing the
@@ -2341,6 +2399,7 @@ class RFDETR:
         shape: tuple[int, int] | None = None,
         patch_size: int | None = None,
         include_source_image: bool = True,
+        use_cv2_resize: bool = False,
         **kwargs: Any,
     ) -> Detections | KeyPoints | list[Detections | KeyPoints]:
         """Performs model inference on the input images.
@@ -2370,6 +2429,11 @@ class RFDETR:
                 ``key_points.data["source_image"]`` because Supervision ``KeyPoints`` currently has no collection-level
                 metadata field. Defaults to ``True``. Set to ``False`` to reduce memory use when source images are not
                 needed.
+            use_cv2_resize:
+                When ``True``, resize the preprocessed batch with ``cv2.resize(..., interpolation=cv2.INTER_LINEAR)``
+                instead of the default ``torchvision`` bilinear resize. Matches a separate C++/OpenCV inference
+                pipeline bit-for-bit; the default path only approximates it (``antialias=False``). Defaults to
+                ``False``.
             **kwargs:
                 Additional keyword arguments.
 
@@ -2603,10 +2667,29 @@ class RFDETR:
                 )
 
         resize_to = list(shape) if shape is not None else [self.model.resolution, self.model.resolution]
-        # antialias=False matches the antialias-free bilinear resize (cv2.INTER_LINEAR)
-        # used by Albumentations during training — see issue #1203.
-        batch_tensor = torch.stack([F.resize(t, resize_to, antialias=False) for t in processed_images])
+        if use_cv2_resize:
+            # True cv2.resize, not the antialias=False approximation below — for bit-for-bit
+            # parity with a separate C++/OpenCV inference pipeline.
+            batch_tensor = torch.stack(
+                [
+                    torch.from_numpy(
+                        cv2.resize(
+                            t.permute(1, 2, 0).cpu().numpy(),
+                            (resize_to[1], resize_to[0]),
+                            interpolation=cv2.INTER_LINEAR,
+                        )
+                    )
+                    .permute(2, 0, 1)
+                    .to(t.device, dtype=t.dtype)
+                    for t in processed_images
+                ]
+            )
+        else:
+            # antialias=False matches the antialias-free bilinear resize (cv2.INTER_LINEAR)
+            # used by Albumentations during training — see issue #1203.
+            batch_tensor = torch.stack([F.resize(t, resize_to, antialias=False) for t in processed_images])
         batch_tensor = F.normalize(batch_tensor, self.means, self.stds)
+        self.last_input_tensor = batch_tensor
 
         if self._is_optimized_for_inference:
             if (
@@ -2662,6 +2745,7 @@ class RFDETR:
                 else:
                     return_predictions["pred_masks"] = predictions[2]
             predictions = return_predictions
+        self.last_prediction = predictions
         target_sizes = torch.tensor(orig_sizes, device=self.model.device)
         results = self.model.postprocess(predictions, target_sizes=target_sizes, score_threshold=threshold)
 
