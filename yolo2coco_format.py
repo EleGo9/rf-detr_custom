@@ -3,6 +3,26 @@ import numpy as np
 import os
 import yaml
 
+# Nomi di cartella accettati per ciascuno split: alcuni dataset YOLO usano
+# "valid", altri "val" (o "validation"). Si prova ognuno in ordine e si usa
+# il primo che esiste davvero su disco.
+SPLIT_ALIASES = {
+    "train": ["train", "training"],
+    "valid": ["valid", "val", "validation"],
+}
+
+
+def resolve_split_dir(base_dir, split):
+    """Trova la sottocartella di `base_dir` per lo split richiesto, provando gli alias noti."""
+    aliases = SPLIT_ALIASES[split]
+    for name in aliases:
+        candidate = os.path.join(base_dir, name)
+        if os.path.isdir(candidate):
+            return candidate
+    raise FileNotFoundError(
+        f"Nessuna cartella tra {aliases} trovata in {base_dir} per lo split '{split}'"
+    )
+
 
 def write_filtered_yaml(source_yaml_path, keep_classes, output_dir):
     with open(source_yaml_path) as f:
@@ -51,8 +71,8 @@ ANNOTATIONS_DIR_PATH = "/media/elena/T9/HAura/mcap/lacisa_yolo_format/labels/"
 DATA_YAML_PATH = "/media/elena/T9/HAura/mcap/lacisa_yolo_format/data.yaml"
 
 dataset_train = sv.DetectionDataset.from_yolo(
-    images_directory_path= os.path.join(IMAGES_DIR_PATH,"train"),
-    annotations_directory_path= os.path.join(ANNOTATIONS_DIR_PATH,"train"),
+    images_directory_path=resolve_split_dir(IMAGES_DIR_PATH, "train"),
+    annotations_directory_path=resolve_split_dir(ANNOTATIONS_DIR_PATH, "train"),
     data_yaml_path=DATA_YAML_PATH
 )
 print(f"Train images: {len(dataset_train)}")
@@ -60,8 +80,8 @@ if KEEP_CLASSES:
     dataset_train = filter_classes(dataset_train, KEEP_CLASSES)
 
 dataset_val = sv.DetectionDataset.from_yolo(
-    images_directory_path=os.path.join(IMAGES_DIR_PATH,"valid"),
-    annotations_directory_path=os.path.join(ANNOTATIONS_DIR_PATH,"valid"),
+    images_directory_path=resolve_split_dir(IMAGES_DIR_PATH, "valid"),
+    annotations_directory_path=resolve_split_dir(ANNOTATIONS_DIR_PATH, "valid"),
     data_yaml_path=DATA_YAML_PATH
 )
 print(f"Valid images: {len(dataset_val)}")

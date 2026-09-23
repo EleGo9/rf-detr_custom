@@ -50,6 +50,8 @@ python yolo2coco_format.py
 
 Genera `OUTPUT_DIR/train/_annotations.coco.json` e `OUTPUT_DIR/valid/_annotations.coco.json` (+ immagini), pronti per il training.
 
+Lo split di validazione può chiamarsi `valid/`, `val/` o `validation/` in ingresso (rilevato automaticamente); in uscita viene sempre scritto come `valid/`, il nome che il resto della pipeline (`train.py`, `eval_dataset.py`) si aspetta.
+
 ---
 
 ## 2) Avviare un training
