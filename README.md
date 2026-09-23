@@ -1,82 +1,139 @@
-# RF-DETR: SOTA Real-Time Detection and Segmentation Model
+# rf-detr_custom
 
-[![version](https://badge.fury.io/py/rfdetr.svg)](https://badge.fury.io/py/rfdetr)
-[![downloads](https://img.shields.io/pypi/dm/rfdetr)](https://pypistats.org/packages/rfdetr)
-[![arXiv](https://img.shields.io/badge/arXiv-2511.09554-b31b1b.svg)](https://arxiv.org/abs/2511.09554)
-[![python-version](https://img.shields.io/pypi/pyversions/rfdetr)](https://badge.fury.io/py/rfdetr)
-[![license](https://img.shields.io/badge/license-Apache%202.0-blue)](https://github.com/roboflow/rfdetr/blob/main/LICENSE)
+Fork locale di [RF-DETR](https://github.com/roboflow/rf-detr) (attualmente allineato alla 1.10.1), con alcune personalizzazioni:
 
-[![hf space](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Spaces-blue)](https://huggingface.co/spaces/SkalskiP/RF-DETR)
-[![colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/roboflow-ai/notebooks/blob/main/notebooks/how-to-finetune-rf-detr-on-detection-dataset.ipynb)
-[![roboflow](https://raw.githubusercontent.com/roboflow-ai/notebooks/main/assets/badges/roboflow-blogpost.svg)](https://blog.roboflow.com/rf-detr)
-[![discord](https://img.shields.io/discord/1159501506232451173?logo=discord&label=discord&labelColor=fff&color=5865f2&link=https%3A%2F%2Fdiscord.gg%2FGbfgXGJ8Bk)](https://discord.gg/GbfgXGJ8Bk)
+- resize `cv2.INTER_LINEAR` in training/inferenza, per parità con una pipeline C++/OpenCV esterna
+- `predict(..., use_cv2_resize=True)` e hook di debug (`get_last_raw_results()`, `get_last_input_tensor()`) per confrontare bit-a-bit output PyTorch vs ONNX/C++
+- `export_onnx.py` con supporto nativo al batch dinamico
 
-RF-DETR is a real-time, transformer-based object detection and instance segmentation model architecture developed by Roboflow and released under the Apache 2.0 license.
+Il pacchetto vive in `rfdetr/` (layout flat, non `src/`).
 
-## Installation
+## Setup
 
-To install RF-DETR, install the `rfdetr` package in a [**Python>=3.9**](https://www.python.org/) environment with `pip`:
+Ambiente conda: `rfdetr`. Installazione **editable** — ogni modifica ai file in `rfdetr/` è effettiva subito, senza reinstallare:
 
 ```bash
-pip install rfdetr
+conda activate rfdetr
+cd rf-detr_custom
+pip install -e . --no-deps        # solo il pacchetto, le dipendenze sono già installate
+# oppure, dipendenze incluse:
+pip install -e ".[train,onnx]"
 ```
 
-To install the entire environment:
+Verifica che punti a questa repo (non a un altro checkout di rf-detr installato in precedenza):
 
-```
-conda create --file environment.yml
-```
-To install locally rfdetr:
-```
-export PYTHONPATH=/home/elenagovi/repos/rf-detr_custom:$PYTHONPATH
+```bash
 python -c "import rfdetr; print(rfdetr.__file__)"
 ```
 
-## Onnx exportation
+I dataset usati sono in formato **COCO, layout Roboflow**: una cartella con sottocartelle `train/`, `valid/` (e opzionalmente `test/`), ognuna con le immagini e un file `_annotations.coco.json`.
 
- ```
- python export_onnx.py   --weights path/to/checkpoint_best.pth   --num-classes 7   --output output/model.onnx
- ```
+---
 
-## Debug comparison between onnx and pth model
+## 1) Convertire un dataset da YOLO a COCO
 
-1) Uncomment lines 327-330 into /home/elena/repos/rf-detr_custom/rfdetr/detr.py
-2) Write your custom input in debug.py (line 7, 10 and 29 into session, image and model)
-3) ```python debug.py```
+Script: [`yolo2coco_format.py`](yolo2coco_format.py)
 
+Modifica le costanti in cima al file, poi esegui:
 
-## Convert an existing dataset from yolo to coco format
-1) Insert the correct paths
-2) ```python yolo2coco_format.py```
+```python
+IMAGES_DIR_PATH = "/path/to/yolo/images/"       # contiene train/ e valid/
+ANNOTATIONS_DIR_PATH = "/path/to/yolo/labels/"   # contiene train/ e valid/
+DATA_YAML_PATH = "/path/to/data.yaml"
+OUTPUT_DIR = "/path/to/output_coco_format"
+KEEP_CLASSES = ["truck", "car", "person", "forklift"]  # None per tenerle tutte
+```
 
-## Test on a video 
-1) Choose the weights you want (default coco weights)
-2) ```python test_from_video.py <video.mp4> [output.mp4]```
+```bash
+python yolo2coco_format.py
+```
 
-## Test on a folder of images and compare two rfdetr models
-1) Change the config in rfdetr/test.py: 
-num_classes = 7
-weights_path = "/path/to/weights.pth"
-images_files = "path/to/images/*"
-output = "path/to/predictions"
-model1 = RFDETRNano() #COCO weights (default)
-model2 = RFDETRNano(num_classes=num_classes, pretrain_weights= weights_path)
+Genera `OUTPUT_DIR/train/_annotations.coco.json` e `OUTPUT_DIR/valid/_annotations.coco.json` (+ immagini), pronti per il training.
 
-2) Based on the weights you want to use, change this import: ```from util.coco_classes import COCO_CLASSES```
-You must have a file like COCO_CLASSES with your model's classes.
+---
 
-3) ```python test.py```
+## 2) Avviare un training
 
-## Training
+Script: [`train.py`](train.py)
 
-1) Change the config in train.py
-dataset = "/media/elena/T7/BDD100K/coco"
+Modifica le costanti in cima al file:
+
+```python
+DATASET = "/path/to/dataset_coco_format"   # cartella con train/ e valid/
 epochs = 100
-num_classes = 7
+num_classes = 4
+freeze_encoder = False
 early_stopping = True
 early_stopping_patience = 20
 batch_size = 8
-grad_accum_steps = 2 # tot BATCH SIZE = batch_size * grad_accum_steps
+grad_accum_steps = 2   # batch effettivo = batch_size * grad_accum_steps
 output_dir = "/path/to/output"
+```
 
-2) ```python train.py```
+```bash
+python train.py
+```
+
+`num_classes` e `freeze_encoder` vanno passati al **costruttore** del modello (`RFDETRNano(num_classes=..., freeze_encoder=...)`), non a `.train(...)`: dalla 1.8 in poi `TrainConfig` rifiuta kwarg non suoi.
+
+Output in `output_dir/`:
+- `checkpoint_best_regular.pth`, `checkpoint_best_ema.pth`, `checkpoint_best_total.pth` (il migliore tra i due — di solito questo è il checkpoint da usare), `last.pth`/`last_ema.pth`
+- `metrics.csv` — curve di train/val per epoca (loss, mAP, precision, recall, F1)
+- `training_config.json` — configurazione effettiva usata
+
+Il training è basato su PyTorch Lightning: se non migliora per `early_stopping_patience` epoche di fila si ferma da solo.
+
+---
+
+## 3) Inferenza su una cartella di immagini e salvataggio
+
+Script: [`predict_images.py`](predict_images.py)
+
+```bash
+python predict_images.py \
+  --weights output_dir/checkpoint_best_total.pth \
+  --images /path/to/images \
+  --output /path/to/predictions \
+  --threshold 0.35
+```
+
+Disegna box + classe + confidenza su ogni immagine (via `supervision`) e le salva in `--output`, mantenendo il nome file originale. `--images` accetta sia una cartella sia un pattern glob (es. `"/path/*.jpg"`).
+
+---
+
+## 4) Inferenza + metriche su un dataset (formato COCO)
+
+Script: [`eval_dataset.py`](eval_dataset.py)
+
+```bash
+python eval_dataset.py \
+  --weights output_dir/checkpoint_best_total.pth \
+  --dataset-dir /path/to/dataset_coco_format \
+  --split val \
+  --per-class
+```
+
+Stampa e restituisce mAP@50:95, mAP@50, mAP@75, mAR, F1, precision, recall (globali e, con `--per-class`, per ogni classe). `--split test` valuta `test/` invece di `valid/`.
+
+---
+
+## 5) Esportare in ONNX
+
+Script: [`export_onnx.py`](export_onnx.py)
+
+```bash
+python export_onnx.py \
+  --weights output_dir/checkpoint_best_total.pth \
+  --num-classes 4 \
+  --output output/model.onnx \
+  --test
+```
+
+Batch dinamico **attivo di default** (asse `batch` sull'input `input` e sugli output `dets`/`labels`); usa `--static-batch` per un batch fisso pari a `--batch-size`. `--simplify` passa il grafo per `onnxsim`; `--test` verifica l'inferenza con `onnxruntime` dopo l'export, a più batch size se dinamico.
+
+---
+
+## Altri script nella repo
+
+- [`debug.py`](debug.py) — confronto manuale output PyTorch vs ONNX su un singolo input, usando gli hook `get_last_raw_results()` / `get_last_input_tensor()`.
+- [`rfdetr/test.py`](rfdetr/test.py), [`rfdetr/test_from_video.py`](rfdetr/test_from_video.py) — script personali di prova/confronto, non parte dell'API pubblica.
