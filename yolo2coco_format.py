@@ -9,19 +9,26 @@ import yaml
 SPLIT_ALIASES = {
     "train": ["train", "training"],
     "valid": ["valid", "val", "validation"],
+    "test": ["test", "testing"],
 }
 
 
-def resolve_split_dir(base_dir, split):
-    """Trova la sottocartella di `base_dir` per lo split richiesto, provando gli alias noti."""
+def resolve_split_dir(base_dir, split, required=True):
+    """Trova la sottocartella di `base_dir` per lo split richiesto, provando gli alias noti.
+
+    Se `required=False` e nessun alias esiste, restituisce None invece di sollevare un errore
+    (usato per lo split "test", che non tutti i dataset hanno).
+    """
     aliases = SPLIT_ALIASES[split]
     for name in aliases:
         candidate = os.path.join(base_dir, name)
         if os.path.isdir(candidate):
             return candidate
-    raise FileNotFoundError(
-        f"Nessuna cartella tra {aliases} trovata in {base_dir} per lo split '{split}'"
-    )
+    if required:
+        raise FileNotFoundError(
+            f"Nessuna cartella tra {aliases} trovata in {base_dir} per lo split '{split}'"
+        )
+    return None
 
 
 def write_filtered_yaml(source_yaml_path, keep_classes, output_dir):
@@ -93,9 +100,28 @@ if KEEP_CLASSES:
         OUTPUT_DIR
     )
 
+# Lo split "test" è opzionale: si converte solo se esiste davvero (sia in
+# images/ che in labels/), altrimenti si salta senza errori.
+test_images_dir = resolve_split_dir(IMAGES_DIR_PATH, "test", required=False)
+test_labels_dir = resolve_split_dir(ANNOTATIONS_DIR_PATH, "test", required=False)
+dataset_test = None
+if test_images_dir and test_labels_dir:
+    dataset_test = sv.DetectionDataset.from_yolo(
+        images_directory_path=test_images_dir,
+        annotations_directory_path=test_labels_dir,
+        data_yaml_path=DATA_YAML_PATH
+    )
+    print(f"Test images: {len(dataset_test)}")
+    if KEEP_CLASSES:
+        dataset_test = filter_classes(dataset_test, KEEP_CLASSES)
+else:
+    print("Nessuno split 'test' trovato, salto.")
+
 # Crea directory output
 os.makedirs(f"{OUTPUT_DIR}/train", exist_ok=True)
 os.makedirs(f"{OUTPUT_DIR}/valid", exist_ok=True)
+if dataset_test is not None:
+    os.makedirs(f"{OUTPUT_DIR}/test", exist_ok=True)
 
 # Salva TRAIN in formato COCO
 dataset_train.as_coco(
@@ -110,3 +136,11 @@ dataset_val.as_coco(
     annotations_path=f"{OUTPUT_DIR}/valid/_annotations.coco.json"
 )
 print(f"Valid saved to {OUTPUT_DIR}/valid/")
+
+# Salva TEST in formato COCO (se presente)
+if dataset_test is not None:
+    dataset_test.as_coco(
+        images_directory_path=f"{OUTPUT_DIR}/test",
+        annotations_path=f"{OUTPUT_DIR}/test/_annotations.coco.json"
+    )
+    print(f"Test saved to {OUTPUT_DIR}/test/")
