@@ -1,0 +1,70 @@
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rfdetr"
+version = "1.10.1+lacisa"
+description = "RF-DETR (local fork: cv2 resize parity, predict() debug hooks, custom forward_export)"
+readme = "README.md"
+authors = [
+    {name = "Roboflow, Inc", email = "develop@roboflow.com"}
+]
+license = {text = "Apache License 2.0"}
+requires-python = ">=3.10"
+
+dependencies = [
+    "requests",
+    "numpy",
+    "torch>=2.2.0",
+    "torchvision>=0.17.0",
+    "tqdm",
+    "transformers>=5.1.0,<6.0.0",
+    "pydantic>=2.0,<3",
+    "supervision>=0.29.0",
+    "pyDeprecate>=0.9,<0.10",
+]
+
+[project.optional-dependencies]
+lora = [
+    "peft",
+]
+train = [
+    "peft",
+    "pytorch_lightning>=2.6,<3,!=2.6.2,!=2.6.3",
+    "torchmetrics[detection]>=1.8.2,<1.9.0",
+    "faster-coco-eval>=1.7.2",
+    "pycocotools",
+    "scipy",
+    "torch-hungarian==0.1.0rc0",
+    "roboflow",
+]
+onnx = [
+    "onnx>=1.16.0,<2.0",
+    "onnxsim>=0.7.0",
+    "onnx_graphsurgeon",
+    "onnxruntime<1.24; python_version < '3.11'",
+    "onnxruntime; python_version >= '3.11'",
+    "polygraphy",
+]
+visual = [
+    "matplotlib",
+    "pandas",
+    "seaborn",
+]
+
+[project.urls]
+Homepage = "https://github.com/roboflow/rf-detr"
+
+[project.scripts]
+rfdetr = "rfdetr.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["rfdetr*"]
+
+[tool.setuptools]
+include-package-data = false
+
+[tool.setuptools.package-data]
+rfdetr = ["py.typed", "models/backbone/dinov2_configs/*.json"]
