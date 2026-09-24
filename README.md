@@ -135,6 +135,34 @@ Batch dinamico **attivo di default** (asse `batch` sull'input `input` e sugli ou
 
 ---
 
+## Capire a quale id corrisponde ogni classe
+
+Script: [`show_class_mapping.py`](show_class_mapping.py)
+
+```bash
+python show_class_mapping.py \
+  --weights output_dir/checkpoint_best_total.pth \
+  --dataset-dir /path/to/dataset_coco_format   # opzionale: aggiunge la colonna category_id
+```
+
+Esempio (lacisa):
+
+| label index (= `class_id` di `predict()`) | nome | `category_id` nel dataset |
+|---|---|---|
+| 0 | truck | 1 |
+| 1 | car | 2 |
+| 2 | person | 3 |
+| 3 | forklift | 4 |
+| 4 | *(background, mai una classe vera)* | — |
+
+Regole generali:
+- `predict()` restituisce `class_id` = **label index 0-based**, e `class_names[class_id]` è il nome (in `detections.data["class_name"]` c'è già risolto).
+- Il label index è la **posizione della categoria nella lista `categories`** del `_annotations.coco.json` di `train/`, non `category_id - 1`: coincidono solo se gli id del dataset sono contigui da 1. Se il dataset ha id tipo 0,1,2 o 5,7,9 la mappa cambia — usa lo script invece di dedurla.
+- Le classi sono salvate nel checkpoint (`args["class_names"]`) e in `training_config.json`.
+- `class_embed` ha `N+1` righe: le prime `N` sono le classi, l'ultima è lo slot di "nessun oggetto". Per questo `num_classes` deve essere **uguale** al numero reale di categorie del dataset.
+
+---
+
 ## Altri script nella repo
 
 - [`debug.py`](debug.py) — confronto manuale output PyTorch vs ONNX su un singolo input, usando gli hook `get_last_raw_results()` / `get_last_input_tensor()`.
