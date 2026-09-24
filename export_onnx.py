@@ -26,6 +26,7 @@ def export_rfdetr_to_onnx(
     opset_version: int = 17,
     simplify: bool = False,
     device: str = "cpu",
+    verbose: bool = False,
 ):
     """
     Esporta un modello RF-DETR in formato ONNX usando l'exporter nativo di rfdetr.
@@ -42,6 +43,8 @@ def export_rfdetr_to_onnx(
         opset_version: Versione ONNX opset (default: 17)
         simplify: Se True, semplifica ulteriormente il modello ONNX con onnxsim
         device: Device per l'export ("cpu" o "cuda")
+        verbose: Se True, stampa l'intero grafo ONNX nodo per nodo (molto rumoroso;
+            utile solo per debug dell'export stesso, non segnala problemi se disattivato)
     """
     from rfdetr import (
         RFDETRBase,
@@ -84,6 +87,7 @@ def export_rfdetr_to_onnx(
         dynamic_batch=dynamic_batch,
         opset_version=opset_version,
         format="onnx",
+        verbose=verbose,
     )
     exported_path = Path(exported_path)
     if str(exported_path) != output_path:
@@ -163,6 +167,7 @@ if __name__ == "__main__":
     parser.add_argument("--opset", type=int, default=17, help="Versione ONNX opset (default: 17)")
     parser.add_argument("--simplify", action="store_true", help="Semplifica il modello ONNX con onnxsim")
     parser.add_argument("--test", action="store_true", help="Testa l'inferenza dopo l'export")
+    parser.add_argument("--verbose", action="store_true", help="Stampa l'intero grafo ONNX nodo per nodo (debug)")
 
     args = parser.parse_args()
 
@@ -176,6 +181,7 @@ if __name__ == "__main__":
         dynamic_batch=not args.static_batch,
         opset_version=args.opset,
         simplify=args.simplify,
+        verbose=args.verbose,
     )
 
     if args.test:
