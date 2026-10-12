@@ -167,3 +167,4 @@ Regole generali:
 
 - [`debug.py`](debug.py) — confronto manuale output PyTorch vs ONNX su un singolo input, usando gli hook `get_last_raw_results()` / `get_last_input_tensor()`.
 - [`rfdetr/test.py`](rfdetr/test.py), [`rfdetr/test_from_video.py`](rfdetr/test_from_video.py) — script personali di prova/confronto, non parte dell'API pubblica.
+- [`haura_raw_to_coco.py`](haura_raw_to_coco.py) — converte il formato raw dei dataset HAura (`cam_r`/`cam_l` con `<ts>.png` + `<ts>_gt.json`, id di classe propri) in formato COCO, rimappando esplicitamente sugli stessi `category_id` usati per lacisa (`truck=1, car=2, person=3, forklift=4`). Modifica `INPUT_DATASETS`/`RAW_CLASS_TO_NAME` in cima al file per altri dataset raw con una numerazione diversa.
