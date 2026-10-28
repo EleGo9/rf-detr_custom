@@ -117,6 +117,17 @@ python eval_dataset.py \
 
 Stampa e restituisce mAP@50:95, mAP@50, mAP@75, mAR, F1, precision, recall (globali e, con `--per-class`, per ogni classe). `--split test` valuta `test/` invece di `valid/`.
 
+**Caso speciale: valutare un checkpoint COCO pre-addestrato (non fine-tuned, es. `RFDETRNano()` di default, `num_classes=90`) su un tuo dataset.** Per default (`--dataset-file roboflow`) il `category_id` che scrivi nel json viene **ignorato** per costruire la label: conta solo la posizione della categoria nella lista `categories` del file. Un modello COCO a 90 classi invece usa il `category_id` sparso (1-90, con buchi) direttamente come indice di output — le due numerazioni non c'entrano nulla tra loro, e il confronto risulta falsato anche se i tuoi `category_id` sono quelli "giusti" di COCO.
+
+```bash
+python eval_dataset.py \
+  --weights ~/.roboflow/models/rf-detr-nano.pth \
+  --dataset-dir /path/to/dataset_coco_format \
+  --split val --dataset-file coco --per-class
+```
+
+`--dataset-file coco` usa `category_id` direttamente, senza rimappatura — ma vuole i `category_id` del tuo dataset uguali ai veri id sparsi COCO (vedi `rfdetr/assets/coco_classes.py` per la lista). Lo script crea in automatico (symlink, nessuna copia) la vista nel layout rigido che questa modalità richiede (`train2017/`/`val2017/` + `annotations/instances_*2017.json`) a partire dalle tue cartelle `train/`/`valid/`.
+
 ---
 
 ## 5) Esportare in ONNX
