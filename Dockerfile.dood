@@ -34,6 +34,9 @@ USER vscode
 
 
 WORKDIR /workspaces/rfdetr
+# rfdetr caches the base weights in $RF_HOME: keep them in the mounted data/ dir
+# so they are downloaded only once (see tkTrain trainpipe/cvat/nets/RFDETR.py)
+ENV RF_HOME=/workspaces/rfdetr/data/weights/rfdetr
 COPY . .
 RUN pip install --upgrade pip setuptools wheel
 RUN pip install -e ".[train,onnx,visual]"
