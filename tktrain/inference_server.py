@@ -10,7 +10,7 @@ import torch
 import uvicorn
 import yaml
 from easydict import EasyDict
-from fastapi import FastAPI, File, UploadFile
+from fastapi import FastAPI, File, HTTPException, UploadFile
 from PIL import Image
 
 # Import specifici per RF-DETR
@@ -19,7 +19,10 @@ from rfdetr.assets.model_weights import download_pretrain_weights, get_model_cac
 
 parser = argparse.ArgumentParser(description="RF-DETR Inference Server")
 parser.add_argument(
-    "--cfg", type=str, required=True, help="Path to the config YAML file"
+    "--cfg",
+    type=str,
+    required=True,
+    help="Network config, trainpipe standard format (doc/net_config.md): infer.weights",
 )
 args = parser.parse_args()
 
@@ -62,7 +65,8 @@ async def lifespan(app: FastAPI):
     cfg = load_config(args.cfg)
 
     print(f"🚀 Caricamento rete RF-DETR in VRAM ({DEVICE})...")
-    model_path = cfg.model
+    # a base model name (downloaded once in the cache) or a checkpoint path
+    model_path = cfg.infer.weights
     print(f"   WEIGHTS/MODEL: {model_path}")
 
     # Utilizziamo la nuova funzione wrapper per gestire sia cache che percorsi locali
@@ -76,11 +80,14 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 
 
+@app.get("/health")
+async def health():
+    # answered only once the model is loaded (lifespan startup is done)
+    return {"status": "ok"}
+
+
 @app.get("/get_labels")
 async def get_labels():
-    if MODEL is None:
-        return {"error": "Modello non ancora caricato"}, 500
-
     try:
         class_names = MODEL.class_names
         if isinstance(class_names, list):
@@ -102,6 +109,10 @@ async def predict_batch(thr: float = 0.5, files: List[UploadFile] = File(...)):
         contents = await file.read()
         nparr = np.frombuffer(contents, np.uint8)
         img_cv2 = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        if img_cv2 is None:
+            raise HTTPException(
+                status_code=400, detail=f"Cannot decode image {file.filename}"
+            )
 
         img_rgb = cv2.cvtColor(img_cv2, cv2.COLOR_BGR2RGB)
         pil_img = Image.fromarray(img_rgb)
